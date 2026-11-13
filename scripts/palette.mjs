@@ -6,6 +6,7 @@
 //
 //   node scripts/palette.mjs --accent "#dd4428" [--bg light|dark|"#f4f2ee"] [--second auto|"#2b7a4b"]
 //                            [--name my-deck] [--html swatches.html] [--json]
+//                            [--theme-out themes/my-theme [--description "..."] [--fonts-url URL] [--display "stack"] [--text "stack"] [--mono "stack"]]
 //
 // Guarantees (the run exits 1 if one cannot be met, e.g. a custom mid-tone background):
 //   ink          >= 7:1 on the background (aims for 12:1)
@@ -226,6 +227,42 @@ pre { margin: 24px 0 0; padding: 16px; border: 1px solid var(--rule); border-rad
 `;
 }
 
+// A theme skeleton (theme.css + theme.json, 16-themes.md) from two computed palettes, the default variant first:
+// the six roles, the aliases the template's primitives use (--line, --accent-soft, --surface) and the --dk-* runtime
+// variables. The default variant sits on :root, the other under [data-theme="light|dark"]; fonts are shared.
+export function themeFiles(pDefault, pOther, { name = 'theme', description = '', fontsUrl = '', display, text, mono } = {}) {
+  const tokens = p => {
+    const by = Object.fromEntries(p.roles.map(r => [r.role, r.hex]));
+    const [bL] = hexToOklch(p.bg), [, aC, aH] = hexToOklch(by.accent);
+    const soft = oklchToHex([p.dark ? Math.min(.9, bL + .1) : Math.max(.05, bL - .07), Math.min(aC, .06), aH]);   // marker behind ink text
+    return [`color-scheme: ${p.dark ? 'dark' : 'light'};`,
+      `--bg: ${by.background}; --ink: ${by.ink}; --muted: ${by.muted}; --rule: ${by.rule}; --line: var(--rule);`,
+      `--accent: ${by.accent}; --accent-text: ${by['accent-text']}; --on-accent: ${by['on-accent']}; --accent-soft: ${soft};`,
+      `--second: ${by.second}; --second-text: ${by['second-text']}; --on-second: ${by['on-second']};`,
+      `--surface: ${p.dark ? 'color-mix(in oklab, var(--bg), var(--ink) 8%)' : '#fff'};`,
+      // runtime hooks (01-runtime.md): they reference the tokens above, so they are restated per variant
+      `--dk-mark: var(--accent-soft); --dk-letterbox: ${p.dark ? '#000' : '#0e0e10'}; --dk-progress: var(--accent);`,
+      `--dk-number: var(--muted); --dk-ov-accent: var(--accent); --dk-proof: var(--muted); --dk-say-pay: var(--accent-text);`].map(l => '  ' + l).join('\n');
+  };
+  const sys = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+  const [def, oth] = [pDefault.dark ? 'dark' : 'light', pOther.dark ? 'dark' : 'light'];
+  const css = `/* ${name}: ${def} (default) and ${oth} variants, tokens from scripts/palette.mjs (16-themes.md). Edit freely; re-run sync-runtime.mjs --theme to apply.
+   Components use the variables only, so a variant is one block of tokens. T in the deck, ?theme=${oth} or data-theme on .deck switches. */
+:root {
+${tokens(pDefault)}
+  --display: ${display || sys}; --text: ${text || sys}; --mono: ${mono || 'ui-monospace, "SF Mono", Menlo, monospace'};
+  --dk-number-font: var(--mono);
+}
+:root[data-theme="${oth}"], .deck[data-theme="${oth}"] {
+${tokens(pOther)}
+}
+/* optional: a brand fragment (theme.json "brand") is injected into every slide as .dk-brand */
+.dk-brand { position: absolute; right: 150px; top: 60px; z-index: 5; color: var(--muted); font: 600 22px/1 var(--text); letter-spacing: .08em; }
+`;
+  const json = { name, description, ...(fontsUrl ? { fonts: fontsUrl } : {}), variants: [def, oth], default: def };
+  return { css, json: JSON.stringify(json, null, 2) + '\n' };
+}
+
 /* ───────── cli ───────── */
 
 const HELP = `deck-kit palette generator
@@ -238,6 +275,10 @@ const HELP = `deck-kit palette generator
   --name NAME             name for the comment header and the swatch page
   --html FILE             also write a small swatch page
   --json                  print the palette as JSON instead of the table
+  --theme-out DIR         write a theme skeleton with a light and a dark variant (DIR/theme.css, DIR/theme.json) for
+                          scripts/sync-runtime.mjs --theme; --bg picks the default variant, the other one is computed
+                          from the same accent. DIR's name is the theme name unless --name is given. Optional: --description, --fonts-url
+                          (a fonts.googleapis.com URL), --display / --text / --mono (CSS font stacks)
 
 Prints CSS variables for :root and a table of every role with its WCAG 2 ratio and APCA Lc.
 Guarantees: ink >= 7:1, muted >= 4.5:1, accent-text and second-text >= 4.5:1 (variants of the
@@ -250,6 +291,7 @@ function cli() {
   const flag = n => { const i = a.indexOf(n); if (i < 0) return false; a.splice(i, 1); return true; };
   if (!a.length || flag('-h') || flag('--help')) { console.log(HELP); return; }
   const json = flag('--json'), accent = opt('--accent'), bg = opt('--bg', 'light'), second = opt('--second', 'auto'), name = opt('--name', ''), html = opt('--html', null);
+  const themeOut = opt('--theme-out', null), desc = opt('--description', ''), fontsUrl = opt('--fonts-url', ''), display = opt('--display'), text = opt('--text'), mono = opt('--mono');
   if (!accent) { console.error('--accent is required\n\n' + HELP); process.exit(1); }
   const p = derivePalette({ accent, bg, second });
   if (json) console.log(JSON.stringify({ name, dark: p.dark, roles: Object.fromEntries(p.roles.map(r => [r.css.slice(2), { hex: r.hex, oklch: r.oklch.map(x => +x.toFixed(4)), wcag: +r.ratio.toFixed(2), apca: +Math.abs(r.lc).toFixed(1) }])), warnings: p.warnings, failed: p.failed }, null, 1));
@@ -260,6 +302,12 @@ function cli() {
     for (const w of p.warnings) console.log(`warning: ${w}`);
   }
   if (html) { fs.writeFileSync(path.resolve(html), swatchHtml(p, name)); if (!json) console.log(`\nswatches: ${html}`); }
+  if (themeOut) {
+    const dir = path.resolve(themeOut), t = themeFiles(p, derivePalette({ accent, bg: p.dark ? 'light' : 'dark', second }), { name: name || path.basename(dir), description: desc, fontsUrl, display, text, mono });
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'theme.css'), t.css); fs.writeFileSync(path.join(dir, 'theme.json'), t.json);
+    if (!json) console.log(`\ntheme: ${themeOut}/theme.css, theme.json`);
+  }
   if (p.failed.length) { console.error(`palette: guarantee not met (${p.failed.join('; ')})`); process.exit(1); }
 }
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) cli();

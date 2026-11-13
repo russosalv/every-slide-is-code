@@ -1,0 +1,10 @@
+{
+  "name": "paper",
+  "description": "Warm off-white paper, ink text, green accent; dark variant on T. Newsreader + Public Sans.",
+  "fonts": "https://fonts.googleapis.com/css2?family=Newsreader:wght@400;500;600&family=Public+Sans:wght@400;500;600&display=block",
+  "variants": [
+    "light",
+    "dark"
+  ],
+  "default": "light"
+}

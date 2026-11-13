@@ -1,0 +1,24 @@
+/* paper: light (default) and dark variants, tokens from scripts/palette.mjs (16-themes.md). Edit freely; re-run sync-runtime.mjs --theme to apply.
+   Components use the variables only, so a variant is one block of tokens. T in the deck, ?theme=dark or data-theme on .deck switches. */
+:root {
+  color-scheme: light;
+  --bg: #f4f2ee; --ink: #342e24; --muted: #6e675a; --rule: #c2bbaf; --line: var(--rule);
+  --accent: #0f7b5f; --accent-text: #0f7b5f; --on-accent: #fcfaf6; --accent-soft: #b5e9d5;
+  --second: #6d5c9d; --second-text: #6d5c9d; --on-second: #fcfaf6;
+  --surface: #fff;
+  --dk-mark: var(--accent-soft); --dk-letterbox: #0e0e10; --dk-progress: var(--accent);
+  --dk-number: var(--muted); --dk-ov-accent: var(--accent); --dk-proof: var(--muted); --dk-say-pay: var(--accent-text);
+  --display: "Newsreader", Georgia, serif; --text: "Public Sans", system-ui, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --dk-number-font: var(--mono);
+}
+:root[data-theme="dark"], .deck[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #09110e; --ink: #c0d1ca; --muted: #8fa19a; --rule: #3c4843; --line: var(--rule);
+  --accent: #0f7b5f; --accent-text: #2a8c6f; --on-accent: #f6fbf9; --accent-soft: #002e21;
+  --second: #6d5c9d; --second-text: #8373b6; --on-second: #f6fbf9;
+  --surface: color-mix(in oklab, var(--bg), var(--ink) 8%);
+  --dk-mark: var(--accent-soft); --dk-letterbox: #000; --dk-progress: var(--accent);
+  --dk-number: var(--muted); --dk-ov-accent: var(--accent); --dk-proof: var(--muted); --dk-say-pay: var(--accent-text);
+}
+/* optional: a brand fragment (theme.json "brand") is injected into every slide as .dk-brand */
+.dk-brand { position: absolute; right: 150px; top: 60px; z-index: 5; color: var(--muted); font: 600 22px/1 var(--text); letter-spacing: .08em; }

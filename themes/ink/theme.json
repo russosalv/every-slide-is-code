@@ -1,0 +1,10 @@
+{
+  "name": "ink",
+  "description": "Near-black ink, amber accent; light variant on T. Space Grotesk + JetBrains Mono.",
+  "fonts": "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;500&display=block",
+  "variants": [
+    "dark",
+    "light"
+  ],
+  "default": "dark"
+}

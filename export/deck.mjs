@@ -14,6 +14,7 @@
 
 import { chromium } from 'playwright-core';
 import { resolveLaunchOptions } from './chrome.mjs';
+import { withVariant } from '../scripts/theme.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
@@ -27,6 +28,7 @@ const HELP = `deck-kit export
                                               --steps   one page per step   --raster  image pages
   node deck.mjs pptx   deck.html [out.pptx]   static PowerPoint: full-bleed image per page + speaker notes
                                               --steps   one slide per step
+  (any command)  --theme-variant light|dark   export in that theme variant (16-themes.md)
                                               --editable  native text boxes, shapes and tables; SVG, images and
                                                           gradients stay pictures (see 12-export-qa.md)
   node deck.mjs png    deck.html [dir]        rest frame of every step as PNG   --last  final steps only
@@ -109,7 +111,7 @@ async function workerMain() {
   page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
   page.on('pageerror', e => errs.push(String(e)));
   if (cfg.nofonts) await page.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
-  await page.goto(pathToFileURL(cfg.inputAbs).href + '?render' + (cfg.hold ? `&hold=${cfg.hold}` : ''));
+  await page.goto(withVariant(pathToFileURL(cfg.inputAbs).href + '?render' + (cfg.hold ? `&hold=${cfg.hold}` : ''), cfg.variant));
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 60000 });
   // --timings: the step holds come from a timings file (a voice-over's onsets). The runtime's timeline() returns the
   // live object that __draw reads, so resolving the holds here and rewriting its segments in place changes every
@@ -335,7 +337,7 @@ async function main() {
   const O = {
     steps: flag('--steps'), editable: flag('--editable'), raster: flag('--raster'), last: flag('--last'), jpg: flag('--jpg'), nofonts: flag('--no-webfonts'), timeline: flag('--timeline'),
     draft: flag('--draft'), profile: flag('--profile'), write: flag('--write'), hold: opt('--hold', null), hashes: opt('--signatures', null),
-    workers: opt('--workers', 'auto'), outDir: opt('--out', null),
+    workers: opt('--workers', 'auto'), outDir: opt('--out', null), variant: opt('--theme-variant', null),
     voice: opt('--voice', null), timings: opt('--timings', null), captions: opt('--captions', null), loudnorm: flag('--loudnorm'),
     tail: +opt('--tail', .6), fromNotes: flag('--from-notes'), checkTimings: opt('--check', null), wpm: +opt('--wpm', 150), pause: +opt('--pause', .5),
     cols: +opt('--cols', 5), slide: +opt('--slide', 2), frames: +opt('--frames', 8),
@@ -381,7 +383,7 @@ async function main() {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: scale });
     page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
     page.on('pageerror', e => errors.push(String(e)));
-    await page.goto(pathToFileURL(inputAbs).href + '?render' + (O.hold ? `&hold=${O.hold}` : ''));
+    await page.goto(withVariant(pathToFileURL(inputAbs).href + '?render' + (O.hold ? `&hold=${O.hold}` : ''), O.variant));
     await page.waitForFunction(() => window.__ready === true, null, { timeout: 60000 });
     const meta = await page.evaluate(() => ({ ...window.__meta, deck: window.__deck.slides, title: document.title }));
     await page.setViewportSize({ width: meta.W, height: meta.H });
@@ -474,7 +476,7 @@ async function main() {
 
   /* ───── commands on the worker pool ───── */
   async function parallel(cmd) {
-    const pool = new Pool({ inputAbs, nofonts: O.nofonts, hold: O.hold, hashes: !!O.hashes, profile: O.profile, pointerAuto: cmd === 'check',
+    const pool = new Pool({ inputAbs, variant: O.variant, nofonts: O.nofonts, hold: O.hold, hashes: !!O.hashes, profile: O.profile, pointerAuto: cmd === 'check',
       timings: timingsData, defaultEnd: voiceDur != null ? voiceDur + O.tail : undefined });
     const info = await pool.start(cmd === 'still' ? Math.max(1, Math.min(nWorkers, Math.ceil(rest.filter(Boolean).length / 3))) : cmd === 'strip' ? Math.min(nWorkers, Math.ceil(O.frames / 2)) : nWorkers);
     const { meta } = info;
@@ -646,7 +648,7 @@ async function main() {
 
   /* ───── timings: a starter file from the speaker notes, or a dry run of a file ───── */
   async function timingsCmd() {
-    const pool = new Pool({ inputAbs, nofonts: O.nofonts, hold: O.hold });
+    const pool = new Pool({ inputAbs, variant: O.variant, nofonts: O.nofonts, hold: O.hold });
     try {
       const info = await pool.start(1);
       const defaultEnd = voiceDur != null ? voiceDur + O.tail : undefined;

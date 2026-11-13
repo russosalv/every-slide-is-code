@@ -6,7 +6,8 @@
   "description": "Test setup for deck-kit: node:test for the tooling, a Chrome check for the runtime",
   "scripts": {
     "test": "node runtime/test/run.mjs",
-    "test:browser": "node runtime/test/browser.check.mjs"
+    "test:browser": "node runtime/test/browser.check.mjs",
+    "test:pptx": "node runtime/test/pptx.check.mjs"
   },
   "engines": { "node": ">=18" },
   "devDependencies": {

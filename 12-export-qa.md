@@ -10,6 +10,7 @@ The HTML deck is the source. Every other format is a view of it:
 |---|---|---|
 | PDF | `node deck.mjs pdf deck.html` | vector, selectable text, one page per slide at its final step; `--steps` for every step, `--raster` for image pages |
 | PPTX | `node deck.mjs pptx deck.html` | one full-bleed image per slide plus speaker notes; static and not editable as shapes |
+| editable PPTX | `node deck.mjs pptx deck.html out.pptx --editable` | native text boxes, shapes and tables; charts, SVG, images and gradients stay pictures; speaker notes (see "Editable PPTX") |
 | PNG | `node deck.mjs png deck.html frames/` | the rest frame of every step; `--last` final steps only; `--jpg --width 960` for small previews |
 | single states | `node deck.mjs still deck.html 6.2 6.2@0.4 --out stills` | exactly the named frames as PNG (see "Look at one state") |
 | GIF | `node deck.mjs gif deck.html teaser.gif --hold 1.1 --to 30` | the video timeline; frame-differenced, so holds cost almost nothing; parallel, `--draft` for previews |
@@ -18,11 +19,55 @@ The HTML deck is the source. Every other format is a view of it:
 | reference report | `node deck.mjs analyze reference.pdf` | palette and roles, accent share, words, text sizes, layout regularity of someone else's deck (see "Analyse a reference") |
 | offline HTML | `node deck.mjs bundle deck.html deck.offline.html` | Google Fonts, CDN scripts and remote images inlined, plus metric-matched fallback fonts |
 
-Setup once: `cd export && npm install`. Needs Node 18+ and Google Chrome (another Chromium via `CHROME_PATH`).
+Setup once: `cd export && npm install`. Needs Node 18+ and a Chromium: `CHROME_PATH` if set, else an installed Google Chrome, else the newest Chromium that Playwright downloaded (`npx playwright-core install chromium`; looked up in `~/.cache/ms-playwright`, `~/Library/Caches/ms-playwright` or `%LOCALAPPDATA%\ms-playwright`). With none of them the command stops with a message that says so.
 
 PDF and PPTX are static on purpose: PDF viewers do not play animation outside Acrobat, and PowerPoint cannot run the deck's builds. The rest-frame rule (00-agent-brief.md, 18) is what makes them good.
 
 **The video timeline.** Each step holds for `data-hold` seconds (per slide, per step, or `--hold` for all), transitions play in between, step-0 builds start during the incoming transition. `--from` and `--to` cut a range.
+
+### Editable PPTX: `pptx --editable`
+
+```bash
+node deck.mjs pptx deck.html talk.pptx --editable      # --steps: one slide per step
+```
+
+For clients who want to retouch the deck in PowerPoint. The default export is a picture per slide; this one rebuilds the rest frame of every slide as PowerPoint objects. Pass the deck through `check` first: the export reads the same rest frame, so a deck that is clean there converts cleanly.
+
+What happens per slide:
+
+| In the deck | In the PPTX |
+|---|---|
+| text (h1-h3, p, li, spans, `<br>`, `::before`/`::after` strings, list markers) | native text boxes: position and size from the browser's own text rectangle, font family, size, weight, italic, colour (with alpha), underline, strike, letter spacing, alignment, `text-transform`, line breaks, line spacing; inline runs keep their own style |
+| `table` | native table: column widths, row heights, cell fill, per-side borders, padding, alignment, colspan and rowspan |
+| boxes with a background colour or a border | rectangles, rounded rectangles (from `border-radius`) and ellipses (50%); a border on some sides only becomes thin filled bars |
+| `svg`, `canvas`, `img`, `video` | a transparent PNG of exactly that element at 2x, placed at the same rectangle, above the background and under the text; an SVG with `overflow: visible` is cut where it really paints |
+| gradient or image backgrounds, `box-shadow`, `::before`/`::after` decoration, highlighter marks | the element's own paint as a PNG (its text and children hidden for the capture, so nothing is drawn twice), under the text; the box itself stays a native shape |
+| a transformed (rotated, scaled), filtered, masked or blended element and its whole subtree | one PNG of the subtree |
+| slide background | a flat colour when the slide is flat, otherwise a full-slide JPEG of the slide without its content (this includes the stage world, grain, the progress bar and the page number) |
+| speaker notes | slide notes, as in the default export |
+
+Stacking is simplified: background, then shapes and pictures in DOM order, then tables, then all text on top. A picture that is meant to cover text will not.
+
+The command ends with a count (for example `111 text boxes, 23 shapes, 0 tables native; 21 cut-out pictures + 15 picture backgrounds`) and the fonts it used.
+
+**Fidelity**, measured by opening the result in LibreOffice and putting it next to the rest frames (`png --last`) with the Google fonts installed:
+
+| Deck | Native objects | Cut-out pictures | Reading |
+|---|---|---|---|
+| `template/deck.html` (9 slides) | 28 text boxes, 2 shapes | 4 (3 charts, 1 highlighter mark) | 88% of objects native; charts are the only pictures |
+| `examples/demo/deck.html` (15 slides) | 111 text boxes, 23 shapes | 21 charts and illustrations, plus 15 grain backgrounds | 86% of objects native (a background picture counts as one object); every title, label, caption and card is editable, every chart is not |
+
+Texts and boxes land within a pixel or two of the rest frame. What differs: dashed borders become solid, the page number and progress bar are baked into the background picture or dropped when the background is flat, and a highlighter mark is a picture behind editable text.
+
+**Honest limits.**
+
+- **Fonts are not embedded.** The file names the deck's fonts; where they are not installed PowerPoint substitutes another face, usually a wider one. Install the Google fonts on the machine that edits the file. Single-line text never wraps (so a wider font overflows its box instead of re-wrapping); a wrapping paragraph is only 1% wider than the browser's text, so a wider font adds lines. Lines that end in a `<br>` keep their break.
+- **Charts and diagrams are pictures.** An SVG is not converted to PowerPoint shapes or chart objects: it can be moved and resized, its numbers cannot be edited. Edit the HTML and export again for that.
+- **Tight line spacing** (under 100% of the font's own line height, as in big titles) is reproduced with a proportional spacing and a measured nudge; PowerPoint and LibreOffice place the first line a few pixels differently from Chrome.
+- **Not converted:** `text-shadow`, border style (dashed and dotted borders become solid), per-corner radii (the top-left value is used for all four), `::before`/`::after` text that is not a plain string (`counter()`, `attr()`: kept as a picture of the element's generated content), `position: sticky`/`fixed` chrome outside the slide.
+- **Builds are gone.** Only the last step is exported (every step with `--steps`); animation, transitions and morphs do not exist in the file.
+- LibreOffice clips semi-transparent letter-spaced text to a box that ignores the spacing; PowerPoint does not. Check in the application the client uses; only LibreOffice was available while writing this.
+- `npm run test:pptx` checks the export on the template and on a fixture (slide count, searchable native text, a native table, shapes, valid paragraph properties, notes, and that the default export is still image-only).
 
 ## Checking
 

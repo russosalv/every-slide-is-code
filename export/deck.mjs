@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // deck-kit exporter. The HTML deck is the source; every other format is a view of it.
 // Usage: node deck.mjs <command> <deck.html> [out] [options]   (run with no args for help)
-// Chrome: the installed Google Chrome by default; another binary via CHROME_PATH.
+// Chrome: CHROME_PATH, else the installed Google Chrome, else the newest Chromium Playwright downloaded (chrome.mjs).
 //
 // Speed: frames are captured with CDP Page.captureScreenshot (optimizeForSpeed) instead of
 // page.screenshot, and gif / mp4 / check / png / sheet / strip / still run on a pool of browsers
@@ -13,6 +13,7 @@
 // Reference analysis: analyze REF... lives in ../scripts/analyze-reference.mjs (pdf.js inside the same Chrome).
 
 import { chromium } from 'playwright-core';
+import { resolveLaunchOptions } from './chrome.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
@@ -26,6 +27,8 @@ const HELP = `deck-kit export
                                               --steps   one page per step   --raster  image pages
   node deck.mjs pptx   deck.html [out.pptx]   static PowerPoint: full-bleed image per page + speaker notes
                                               --steps   one slide per step
+                                              --editable  native text boxes, shapes and tables; SVG, images and
+                                                          gradients stay pictures (see 12-export-qa.md)
   node deck.mjs png    deck.html [dir]        rest frame of every step as PNG   --last  final steps only
                                               --jpg --width 960  small JPEG previews
   node deck.mjs sheet  deck.html [sheet.png]  contact sheet of every rest frame --cols 5
@@ -77,7 +80,7 @@ const opt = (n, d) => { const i = argv.indexOf(n); return i < 0 ? d : argv.splic
 
 const CHROME_ARGS = ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows',
   '--force-color-profile=srgb', '--hide-scrollbars'];
-const launchOpts = process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' };
+const launchOpts = resolveLaunchOptions();
 const buf = u8 => (Buffer.isBuffer(u8) ? u8 : Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength));
 
 // A frame's signature: mean luma of a 16x9 grid, one hex byte per block. Two renders of the same time
@@ -330,7 +333,7 @@ async function main() {
   }
   const widthArg = opt('--width', null);
   const O = {
-    steps: flag('--steps'), raster: flag('--raster'), last: flag('--last'), jpg: flag('--jpg'), nofonts: flag('--no-webfonts'), timeline: flag('--timeline'),
+    steps: flag('--steps'), editable: flag('--editable'), raster: flag('--raster'), last: flag('--last'), jpg: flag('--jpg'), nofonts: flag('--no-webfonts'), timeline: flag('--timeline'),
     draft: flag('--draft'), profile: flag('--profile'), write: flag('--write'), hold: opt('--hold', null), hashes: opt('--signatures', null),
     workers: opt('--workers', 'auto'), outDir: opt('--out', null),
     voice: opt('--voice', null), timings: opt('--timings', null), captions: opt('--captions', null), loudnorm: flag('--loudnorm'),
@@ -394,7 +397,7 @@ async function main() {
   const done = msg => { if (errors.length) console.warn(`page errors:\n  ${[...new Set(errors)].join('\n  ')}`); console.log(msg); };
 
   try {
-    const { page, meta } = await open();
+    const { page, meta } = await open(cmd === 'pptx' && O.editable ? 2 : 1);
 
     if (cmd === 'pdf') {
       const list = await states(page, O.steps ? 'all' : 'last');
@@ -419,6 +422,14 @@ async function main() {
       pptx.defineLayout({ name: 'DECK', width: wIn, height: hIn }); pptx.layout = 'DECK';
       pptx.title = meta.title || base;
       const list = await states(page, O.steps ? 'all' : 'last');
+      if (O.editable) {
+        const { addEditableSlides, writeEditable, formatReport } = await import('./pptx-editable.mjs');
+        const stats = await addEditableSlides({ page, meta, list, pptx, wIn });
+        await writeEditable(pptx, out);
+        stats.warnings.forEach(w => console.warn('warning: ' + w));
+        done(`pptx: ${out} (${list.length} slides, editable: ${formatReport(stats)})`);
+        return;
+      }
       for (const st of list) {
         const png = await showShot(page, meta, st, 'png');
         const s = pptx.addSlide();

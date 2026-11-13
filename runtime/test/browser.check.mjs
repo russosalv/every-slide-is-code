@@ -16,6 +16,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveLaunchOptions } from '../../export/chrome.mjs';
 import * as Plan from '../../scripts/plan.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url)), root = path.resolve(here, '../..');
@@ -71,7 +72,7 @@ function discover() {
 
 /* ───────────────────────── harness ───────────────────────── */
 
-const launch = process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' };
+const launch = resolveLaunchOptions();
 const browser = await chromium.launch({ ...launch, args: ['--force-color-profile=srgb', '--disable-lcd-text'] });
 // One reporter per deck: decks run side by side, so their lines are buffered and printed together.
 const reporters = [];

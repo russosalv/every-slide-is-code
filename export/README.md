@@ -10,13 +10,14 @@ Node 18+ and Google Chrome.
 npm install
 ```
 
-Chrome elsewhere: `CHROME_PATH=/path/to/chrome node deck.mjs ...`. MP4 also needs `ffmpeg` in PATH; GIF does not.
+Browser: `CHROME_PATH=/path/to/chrome` if set, else an installed Google Chrome, else the newest Chromium that Playwright downloaded (`npx playwright-core install chromium`; `~/.cache/ms-playwright` on Linux, `~/Library/Caches/ms-playwright` on macOS, `%LOCALAPPDATA%\ms-playwright` on Windows). `chrome.mjs` does the lookup; with no browser the command stops and says what to install. MP4 also needs `ffmpeg` in PATH; GIF does not.
 
 ## Commands
 
 ```bash
 node deck.mjs pdf    deck.html [out.pdf]     # vector, final step per slide; --steps, --raster
 node deck.mjs pptx   deck.html [out.pptx]    # static slides + speaker notes; --steps
+node deck.mjs pptx   deck.html out.pptx --editable   # native text boxes, shapes, tables; charts/SVG/gradients as pictures
 node deck.mjs png    deck.html [dir]         # every rest frame; --last, --jpg --width 960
 node deck.mjs sheet  deck.html [sheet.png]   # contact sheet of all rest frames; --cols 5
 node deck.mjs strip  deck.html [strip.png]   # one transition: --slide N --frames 8
@@ -120,6 +121,14 @@ node deck.mjs fonts deck.html out.html --write
 ```
 
 For every family requested from Google Fonts (or declared with `@font-face`), the metrics come from `@capsizecss/metrics`, and a `@font-face` named `<Family> Fallback` on a local system font (Arial, Times New Roman or Courier New, chosen by the family's category) is computed with `size-adjust`, `ascent-override`, `descent-override` and `line-gap-override`. `--write` puts the block in a `<style id="dk-font-fallbacks">` and adds `'<Family> Fallback'` right after the family in every font stack it finds (CSS, custom properties, SVG and canvas font strings). It is idempotent. A family capsize does not know is reported and skipped. `bundle` does the same automatically.
+
+### `pptx --editable`: a PowerPoint the client can retouch
+
+```bash
+node deck.mjs pptx deck.html talk.pptx --editable
+```
+
+Rebuilds the rest frame of each slide with pptxgenjs: text as native text boxes (font, size, weight, colour, alignment, line breaks), `table` as a native table, boxes with a background or border as shapes. SVG, canvas, images, gradients, shadows, `::before`/`::after` decoration and anything rotated or filtered are cut out of the page as transparent PNGs at their exact rectangle and sit under the text; the text they contain is not duplicated. Speaker notes carry over. The code is `pptx-editable.mjs` (one pass in the page reads the DOM, then the pptxgenjs build); it needs the runtime's `.deck > .dk-layer > section.slide` structure, so a hand-made page that only exposes the page contract below gets the default image export. Fonts are not embedded: install the deck's fonts where the file is opened. The command prints how many objects came out native, and `npm run test:pptx` (repository root) checks the result. Limits and the fidelity measured on the template and the demo: [../12-export-qa.md](../12-export-qa.md#editable-pptx-pptx---editable).
 
 ## Page contract
 

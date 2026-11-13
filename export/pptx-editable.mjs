@@ -3,7 +3,9 @@
 // pptxgenjs then rebuilds it as native objects. What cannot be converted well (SVG, canvas, images, gradients, shadows,
 // ::before/::after paint, transformed or filtered subtrees) is cut out of the page as a transparent PNG at its exact
 // rectangle. Stacking: slide background, then shapes and pictures in DOM order, then tables, then text on top.
+import fs from 'node:fs';
 import { PNG } from 'pngjs';
+import JSZip from 'jszip';
 
 const BG_SOLID_TOLERANCE = 3;   // per channel, over a sparse grid of the background shot
 const RASTER_SCALE = 2;         // device pixels per slide pixel for cut-out pictures
@@ -71,7 +73,7 @@ function extractSlide({ i, W }) {
   };
 
   /* a group of text nodes and inline elements that sit in one block: becomes one text box */
-  function textGroup(host, hcs, opacity, parts) {
+  function textGroup(host, hcs, opacity, parts, marker) {
     const nodes = parts.filter(p => p.node).map(p => p.node);
     const runs = [];
     for (const p of parts) {
@@ -107,13 +109,29 @@ function extractSlide({ i, W }) {
     const hardBreaks = merged.filter(r => r.text === '\n').length;
     const nLines = Math.max(lines.length, 1);
     const ta = hcs.textAlign;
+    if (marker) {   // an outside list marker sits one em to the left of the text, in the first run's style
+      const f = merged[0], mw = f.size * 1.2 * k;
+      items.push({ k: 'text', x: u.x - mw - f.size * .5 * k, y: u.y, w: mw, h: Math.min(u.h, (lines.length > 1 ? (lines[1] - lines[0]) * k : u.h)), align: 'right', lines: 1, lineStep: 0, glyphH: 0, hardBreaks: 0, runs: [{ ...f, text: marker }] });
+    }
     items.push({ k: 'text', ...u, align: ta === 'center' ? 'center' : (ta === 'right' || ta === 'end') ? 'right' : 'left', lines: nLines,
       lineStep: nLines > 1 ? ((lines.at(-1) - lines[0]) / (nLines - 1)) * k : 0, glyphH: Math.min(...rects.map(q => q.height)) * k, hardBreaks, runs: merged.map(({ prevSpace, ...r }) => r) });
   }
 
+  function listMarker(el, cs) {
+    const t = cs.listStyleType;
+    if (cs.display !== 'list-item' || t === 'none' || cs.listStylePosition === 'inside') return null;
+    if (t === 'disc') return '\u2022'; if (t === 'circle') return '\u25E6'; if (t === 'square') return '\u25AA';
+    if (/decimal|lower|upper/.test(t)) {
+      const ol = el.parentElement; const n = (ol && ol.localName === 'ol' ? (ol.start || 1) : 1) + [...(ol ? ol.children : [])].indexOf(el);
+      if (t === 'decimal') return n + '.';
+      const a = String.fromCharCode((t.startsWith('upper') ? 64 : 96) + ((n - 1) % 26) + 1); return a + '.';
+    }
+    return null;
+  }
+
   function flow(el, cs, opacity) {
-    let parts = [];
-    const flush = () => { if (parts.length) textGroup(el, cs, opacity, parts); parts = []; };
+    let parts = [], marker = listMarker(el, cs);
+    const flush = () => { if (parts.length) { textGroup(el, cs, opacity, parts, marker); marker = null; } parts = []; };
     const addInline = (node, ecs) => {
       if (node.nodeType === 3) { const t = prepared(node, ecs); if (t) parts.push({ node, text: t, cs: ecs }); }
       else if (node.localName === 'br') parts.push({ br: true, cs: ecs });
@@ -153,7 +171,7 @@ function extractSlide({ i, W }) {
 
   function box(el, cs, rect, opacity) {
     const r = R(rect), bg = colour(cs.backgroundColor), b = sides(cs).map(s => (s.w * k >= .5 && s.a > .02 ? s : { ...s, w: 0 }));
-    const rad = Math.min(px(cs.borderTopLeftRadius) * k, r.w / 2, r.h / 2);
+    const rv = cs.borderTopLeftRadius.split(' ')[0], rad = Math.min(rv.endsWith('%') ? parseFloat(rv) / 100 * Math.min(r.w, r.h) : px(rv) * k, r.w / 2, r.h / 2);
     const shadow = cs.boxShadow !== 'none', pseudo = ['::before', '::after'].some(w => { const c = getComputedStyle(el, w).content; return c && c !== 'none' && c !== 'normal' && !pseudoIsInlineText(el, w); });
     if (cs.backgroundImage !== 'none') { raster(el, 'self', rect); return; }
     if (bg.a > .02 || b.some(s => s.w)) items.push({ k: 'shape', ...r, fill: bg.a > .02 ? bg.hex : null, alpha: bg.a * opacity, radius: rad, round: rad >= Math.min(r.w, r.h) / 2 - .5, sides: b, op: opacity });
@@ -183,6 +201,16 @@ function extractSlide({ i, W }) {
     items.push({ k: 'table', ...r0, colW: xs.slice(1).map((e, j) => e - xs[j]), rowH: rows.map(tr => tr.getBoundingClientRect().height * k), cells, nCols: xs.length - 1 });
   }
 
+  // an svg with overflow: visible paints outside its own box (a badge on the edge, a thick stroke): cut out what it really covers
+  function svgReach(svg, rect) {
+    let x0 = rect.left, y0 = rect.top, x1 = rect.right, y1 = rect.bottom;
+    for (const c of svg.querySelectorAll('*')) {
+      const q = c.getBoundingClientRect();
+      if (q.width || q.height) { const m = (parseFloat(getComputedStyle(c).strokeWidth) || 0) / 2 + 2; x0 = Math.min(x0, q.left - m); y0 = Math.min(y0, q.top - m); x1 = Math.max(x1, q.right + m); y1 = Math.max(y1, q.bottom + m); }
+    }
+    return { left: x0, top: y0, width: x1 - x0, height: y1 - y0 };
+  }
+
   function walk(el, inherited) {
     const cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility === 'hidden') return;
@@ -193,7 +221,7 @@ function extractSlide({ i, W }) {
     if (cs.display === 'contents') { flow(el, cs, opacity); return; }
     if ((rect.width < .5 || rect.height < .5) && !el.textContent.trim()) return;
     if (out) return;
-    if (RASTER_TAGS.has(el.localName) || !flat(cs)) { raster(el, 'sub', rect); return; }
+    if (RASTER_TAGS.has(el.localName) || !flat(cs)) { raster(el, 'sub', el.localName === 'svg' && cs.overflow === 'visible' ? svgReach(el, rect) : rect); return; }
     box(el, cs, rect, opacity);
     if (el.localName === 'table') { table(el, cs, rect, opacity); return; }
     flow(el, cs, opacity);
@@ -302,22 +330,25 @@ export async function addEditableSlides({ page, meta, list, pptx, wIn }) {
 
     for (const t of texts) {
       // text box = the browser's own text rectangle, a little wider so a font that is wider in PowerPoint does not wrap
-      const slack = t.lines > 1 ? .05 : .03, extra = t.w * slack + 4 * 1;
+      const slack = t.lines > 1 ? .01 : .03, extra = t.w * slack + 4;
       let x = t.x, w = t.w + extra;
       if (t.align === 'center') x = t.x - extra / 2; else if (t.align === 'right') x = t.x - extra;
-      // tight line spacing (<100%) lifts the first line in PowerPoint and LibreOffice; .4 of the difference is a measured correction
-      const runs = [];
-      t.runs.forEach((r, idx) => {
+      // paragraph properties go on the first run of each paragraph only: pptxgenjs writes a <a:pPr> for every run that carries one
+      const lineSpacing = t.lines > 1 && t.lineStep && t.glyphH ? Math.round(t.lineStep / t.glyphH * 100) / 100 : 0;
+      const runs = []; let startsPara = true;
+      t.runs.forEach(r => {
         const opts = { fontFace: r.face, fontSize: Math.max(1, r.size * PT), bold: r.bold, italic: r.italic, color: r.color, charSpacing: r.spacing * PT, ...(r.alpha < .98 ? { transparency: Math.round((1 - r.alpha) * 100) } : {}),
           ...(r.underline ? { underline: { style: 'sng' } } : {}), ...(r.strike ? { strike: 'sngStrike' } : {}), ...(r.hl ? { highlight: r.hl } : {}) };
-        r.text.split('\n').forEach((part, j, all) => {
-          if (j > 0) { const prev = runs.at(-1); if (prev) prev.options.breakLine = true; }
-          if (part) runs.push({ text: part, options: { ...opts } });
+        r.text.split('\n').forEach((part, j) => {
+          if (j > 0 && runs.length) { runs.at(-1).options.breakLine = true; startsPara = true; }
+          if (!part) return;
+          runs.push({ text: part, options: { ...opts, ...(startsPara ? { align: t.align, ...(lineSpacing ? { lineSpacingMultiple: lineSpacing } : {}) } : {}) } });
+          startsPara = false;
         });
       });
       if (!runs.length) continue;
-      s.addText(runs, { ...rect({ x, y: t.y + (t.lines > 1 ? .4 * Math.max(0, t.glyphH - t.lineStep) : 0), w, h: t.h }), align: t.align, valign: 'middle', margin: 0, wrap: t.lines > 1 && t.lines > t.hardBreaks + 1, fit: 'none',
-        ...(t.lines > 1 && t.lineStep && t.glyphH ? { lineSpacingMultiple: Math.round(t.lineStep / t.glyphH * 100) / 100 } : {}), paraSpaceBefore: 0, paraSpaceAfter: 0 });
+      // tight line spacing (<100%) lifts the first line in PowerPoint and LibreOffice; .4 of the difference is a measured correction
+      s.addText(runs, { ...rect({ x, y: t.y + (lineSpacing ? .4 * Math.max(0, t.glyphH - t.lineStep) : 0), w, h: t.h }), valign: 'middle', margin: 0, wrap: t.lines > 1 && t.lines > t.hardBreaks + 1, fit: 'none' });
       stats.text++; t.runs.forEach(r => stats.fonts.add(r.face));
     }
 
@@ -334,4 +365,20 @@ export function formatReport(stats) {
   return `${stats.text} text boxes, ${stats.shape} shapes, ${stats.table} tables native; ${stats.picture} cut-out pictures` +
     `${stats.background ? ` + ${stats.background} picture backgrounds` : ''} (${pct}% of objects native)` +
     `${stats.fonts.size ? `\n  fonts used (install them where the file is opened; they are not embedded): ${[...stats.fonts].join(', ')}` : ''}`;
+}
+
+/**
+ * Writes the file. pptxgenjs puts a <a:pPr> in front of every run of a paragraph; the schema allows one, first.
+ * The extra ones are removed so strict readers (PowerPoint, Keynote, Google Slides) get a valid file.
+ */
+export async function writeEditable(pptx, file) {
+  const zip = await JSZip.loadAsync(await pptx.write({ outputType: 'nodebuffer' }));
+  for (const name of Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n))) {
+    const xml = await zip.file(name).async('string');
+    zip.file(name, xml.replace(/<a:p>[\s\S]*?<\/a:p>/g, p => {
+      let seen = 0;
+      return p.replace(/<a:pPr\b[^>]*?(?:\/>|>[\s\S]*?<\/a:pPr>)/g, m => (seen++ ? '' : m));
+    }));
+  }
+  fs.writeFileSync(file, await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
 }

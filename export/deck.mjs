@@ -423,9 +423,9 @@ async function main() {
       pptx.title = meta.title || base;
       const list = await states(page, O.steps ? 'all' : 'last');
       if (O.editable) {
-        const { addEditableSlides, formatReport } = await import('./pptx-editable.mjs');
+        const { addEditableSlides, writeEditable, formatReport } = await import('./pptx-editable.mjs');
         const stats = await addEditableSlides({ page, meta, list, pptx, wIn });
-        await pptx.writeFile({ fileName: out });
+        await writeEditable(pptx, out);
         stats.warnings.forEach(w => console.warn('warning: ' + w));
         done(`pptx: ${out} (${list.length} slides, editable: ${formatReport(stats)})`);
         return;

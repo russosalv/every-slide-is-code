@@ -102,6 +102,18 @@ node deck.mjs bundle ../my-deck.html offline.html   # fonts and CDN scripts inli
 
 Needs Node 18+ and Google Chrome; MP4 also needs ffmpeg. PDF and PPTX are deliberately static: PDF viewers do not play animation outside Acrobat, so every build's final state is designed to read on its own. Details in [12-export-qa.md](12-export-qa.md).
 
+## Themes
+
+A theme is a folder (`theme.css` with the tokens, `theme.json` with name, fonts, an optional brand fragment) that `sync-runtime.mjs` inlines into the deck, so a deck stays one file and changing the look is one command. Themes can have a light and a dark variant: **T** switches it, `?theme=dark` fixes it, the presenter view follows. The kit ships two neutral examples in [`themes/`](themes/); keep your own anywhere and list the folders in `DECK_KIT_THEMES`.
+
+```bash
+node scripts/sync-runtime.mjs --new my-deck.html --theme paper
+node scripts/sync-runtime.mjs --theme ink --variant dark my-deck.html   # change theme, same deck
+node scripts/palette.mjs --accent "#0f7b5f" --theme-out ~/brand/themes/acme   # a theme from one accent
+```
+
+Format and rules in [16-themes.md](16-themes.md).
+
 ## Contents
 
 | File | About |
@@ -120,11 +132,12 @@ Needs Node 18+ and Google Chrome; MP4 also needs ffmpeg. PDF and PPTX are delibe
 | [11-presenting.md](11-presenting.md) | Keys, presenter view, the room, what to send |
 | [12-export-qa.md](12-export-qa.md) | Formats, check, contact sheet, transition strips, checklist |
 | [13-performance.md](13-performance.md) | What the runtime optimises, rules for deck code, measuring |
+| [16-themes.md](16-themes.md) | Swappable themes with light and dark variants, kept outside the repo |
 | [runtime/](runtime/) | `deck.js` and `deck.css`, inlined into every deck |
 | [template/deck.html](template/deck.html) | Starter deck: builds, count, bars, line, flow, morph |
 | [export/](export/) | Exporter and linter (Node + Playwright) |
 | [examples/demo/](examples/demo/) | The Tare pitch: deck and storyline |
-| [scripts/](scripts/) | `sync-runtime.mjs` (new deck, refresh runtime), `pack-skill.sh` (zip for ChatGPT and Claude.ai; a `vX.Y.Z` tag builds it in CI) |
+| [scripts/](scripts/) | `sync-runtime.mjs` (new deck, refresh runtime, `--theme`), `pack-skill.sh` (zip for ChatGPT and Claude.ai; a `vX.Y.Z` tag builds it in CI) |
 | [sources.md](sources.md) | Sources and further reading |
 
 ## Contributing

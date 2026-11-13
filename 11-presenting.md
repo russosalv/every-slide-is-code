@@ -13,6 +13,7 @@ Open the HTML file in Chrome, Edge or Firefox. It scales to any screen and lette
 | O | overview grid; arrows and Enter to jump |
 | P | presenter view in a new window |
 | F | fullscreen |
+| T | light / dark theme variant, when the deck has one; remembered, and the presenter view follows (16-themes.md) |
 | B or . | black screen, press again to return |
 | ? | key help (`H` is the highlighter now; `H` opens the help only when annotation is off) |
 | D / H / L | pen / highlighter / laser pointer (below) |

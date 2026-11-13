@@ -60,6 +60,7 @@ The canvas is 1920×1080 CSS pixels (`data-w`/`data-h` on `.deck` to change it) 
 | `data-dim=".28"` | opacity of dimmed builds |
 | `data-fps="30"` | frame rate reported to the video exporter |
 | `data-w`, `data-h` | canvas size, default 1920×1080 |
+| `data-theme="light\|dark"` | the theme variant the deck opens in; written by `sync-runtime.mjs --theme/--variant`, switched live with **T** (16-themes.md) |
 
 ### `section.slide`
 
@@ -218,10 +219,11 @@ For something the helpers do not cover (a sankey, a map projection, force layout
 | `?presenter` | presenter view (opened with **P**; see 11-presenting.md) |
 | `?embed`, `?embed&rest` | slide only, no input; `rest` shows rest frames. Used inside presenter view |
 | `?render`, `?render&hold=1.2` | exporter: scale 1, no clock. `hold` overrides every step's hold in the timeline |
+| `?theme=dark`, `?theme=light` | any mode: the theme variant (16-themes.md); exports use it to pick one |
 | `?perf` | live, with a frame-rate HUD (13-performance.md) |
 | `?nograin` | `fx.grain` draws nothing (a deck with no other ambient motion then goes fully idle) |
 
-Keys: → ↓ Space PgDn next · ← ↑ PgUp previous · Home/End · digits + Enter go to slide · **O** or **Esc** overview · **P** presenter · **F** fullscreen · **B** or **.** black screen · **?** help · **D** pen · **H** highlighter · **L** laser pointer · **E** erase this slide's marks · **1**–**4** pen colour while drawing (**Esc** leaves the drawing mode first). **H** used to open the help; it now draws (it still opens the help with `data-annotate="off"`).
+Keys: → ↓ Space PgDn next · ← ↑ PgUp previous · Home/End · digits + Enter go to slide · **O** or **Esc** overview · **P** presenter · **F** fullscreen · **T** light/dark theme variant (decks with a theme) · **B** or **.** black screen · **?** help · **D** pen · **H** highlighter · **L** laser pointer · **E** erase this slide's marks · **1**–**4** pen colour while drawing (**Esc** leaves the drawing mode first). **H** used to open the help; it now draws (it still opens the help with `data-annotate="off"`).
 
 Live annotation is drawn on a canvas that the runtime creates on first use, above the slide and below the control bar. It exists only in the live and presenter windows, never in `?render`, so no export can contain it. Pen colours come from the CSS variables `--dk-pen-1` … `--dk-pen-4` (defaults: `--accent`, `--ink`, yellow, white) and the laser from `--dk-laser`. Details and the presenter-view mirroring: 11-presenting.md.
 

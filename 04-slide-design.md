@@ -87,6 +87,8 @@ accent-text  #ca3113  L0.551 C0.194 h33   4.63:1              66       >= 4.5:1 
 - The run exits with code 1 when a guarantee cannot be met, for example a mid-grey custom background that cannot carry 7:1 ink.
 - The colour maths (sRGB to OKLab, gamut mapping by chroma, WCAG 2 ratio, APCA SAPC 0.0.98G-4g) is implemented in `scripts/palette.mjs` itself; no dependency. `--json` prints machine-readable output.
 
+`--theme-out themes/my-look` writes the result as a theme with a light and a dark variant, ready for `sync-runtime.mjs --theme` (16-themes.md).
+
 Paste the variables into the deck's `:root` and rename them to the deck's own vocabulary (`--paper`, `--waste`). Then run `check`: it is the second opinion, against what is really painted.
 
 ## Density

@@ -2,6 +2,8 @@
 
 ## Formats
 
+A deck with a theme that has light and dark variants exports the variant fixed in its source; `?theme=dark` on the URL the exporter opens picks the other (16-themes.md).
+
 The HTML deck is the source. Every other format is a view of it:
 
 | Format | Command | Contents |

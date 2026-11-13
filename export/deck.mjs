@@ -27,6 +27,8 @@ const HELP = `deck-kit export
                                               --steps   one page per step   --raster  image pages
   node deck.mjs pptx   deck.html [out.pptx]   static PowerPoint: full-bleed image per page + speaker notes
                                               --steps   one slide per step
+                                              --editable  native text boxes, shapes and tables; SVG, images and
+                                                          gradients stay pictures (see 12-export-qa.md)
   node deck.mjs png    deck.html [dir]        rest frame of every step as PNG   --last  final steps only
                                               --jpg --width 960  small JPEG previews
   node deck.mjs sheet  deck.html [sheet.png]  contact sheet of every rest frame --cols 5
@@ -331,7 +333,7 @@ async function main() {
   }
   const widthArg = opt('--width', null);
   const O = {
-    steps: flag('--steps'), raster: flag('--raster'), last: flag('--last'), jpg: flag('--jpg'), nofonts: flag('--no-webfonts'), timeline: flag('--timeline'),
+    steps: flag('--steps'), editable: flag('--editable'), raster: flag('--raster'), last: flag('--last'), jpg: flag('--jpg'), nofonts: flag('--no-webfonts'), timeline: flag('--timeline'),
     draft: flag('--draft'), profile: flag('--profile'), write: flag('--write'), hold: opt('--hold', null), hashes: opt('--signatures', null),
     workers: opt('--workers', 'auto'), outDir: opt('--out', null),
     voice: opt('--voice', null), timings: opt('--timings', null), captions: opt('--captions', null), loudnorm: flag('--loudnorm'),
@@ -395,7 +397,7 @@ async function main() {
   const done = msg => { if (errors.length) console.warn(`page errors:\n  ${[...new Set(errors)].join('\n  ')}`); console.log(msg); };
 
   try {
-    const { page, meta } = await open();
+    const { page, meta } = await open(cmd === 'pptx' && O.editable ? 2 : 1);
 
     if (cmd === 'pdf') {
       const list = await states(page, O.steps ? 'all' : 'last');
@@ -420,6 +422,14 @@ async function main() {
       pptx.defineLayout({ name: 'DECK', width: wIn, height: hIn }); pptx.layout = 'DECK';
       pptx.title = meta.title || base;
       const list = await states(page, O.steps ? 'all' : 'last');
+      if (O.editable) {
+        const { addEditableSlides, formatReport } = await import('./pptx-editable.mjs');
+        const stats = await addEditableSlides({ page, meta, list, pptx, wIn });
+        await pptx.writeFile({ fileName: out });
+        stats.warnings.forEach(w => console.warn('warning: ' + w));
+        done(`pptx: ${out} (${list.length} slides, editable: ${formatReport(stats)})`);
+        return;
+      }
       for (const st of list) {
         const png = await showShot(page, meta, st, 'png');
         const s = pptx.addSlide();

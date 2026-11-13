@@ -53,6 +53,17 @@ const reduced = MODE === 'live' && matchMedia('(prefers-reduced-motion: reduce)'
 const DIM = +(deckEl.dataset.dim || .28);
 const html = document.documentElement;
 html.classList.add('dk-mode-' + MODE);
+// Theme variants (16-themes.md): a theme with light and dark variants writes data-theme="light|dark" on .deck. The variant wins in this order:
+// ?theme= in the URL (exports and the presenter's previews pass it), the presenter's last choice (T, live and presenter windows), the attribute in the source.
+const THEME_KEY = 'dk-theme:' + location.pathname, isVariant = v => v === 'light' || v === 'dark';
+let variant = deckEl.dataset.theme || '';
+const paintVariant = v => { deckEl.dataset.theme = v; html.dataset.theme = v; };
+if (variant) {
+  let v = Q.get('theme');
+  if (!isVariant(v) && (MODE === 'live' || MODE === 'presenter')) { try { v = localStorage.getItem(THEME_KEY); } catch (e) { /* storage blocked */ } }
+  if (isVariant(v)) variant = v;
+  paintVariant(variant);
+}
 // Live annotation (D, H, L, E): off for exports, for the "next" preview and for kiosks (data-annotate="off").
 const ANN_ON = deckEl.dataset.annotate !== 'off' && MODE !== 'render' && !(MODE === 'embed' && Q.has('rest'));
 deckEl.style.width = W + 'px';
@@ -1222,6 +1233,16 @@ function toggleOverview(on = !overview) {
   uiUpdate(); annRefresh();
 }
 function markOv() { for (const s of slides) s.layer.classList.toggle('dk-ov-sel', s.i === ovSel); }
+function setVariant(v, { save = false, relay = true } = {}) {
+  if (!variant || !isVariant(v) || v === variant) return;
+  variant = v; paintVariant(v);
+  S.dirty = true; stageKey = '';
+  if (MODE === 'embed' && Q.has('rest')) show(S.i, S.step);   // a still preview has no frame loop
+  if (save) { try { localStorage.setItem(THEME_KEY, v); } catch (e) { /* storage blocked */ } }
+  if (relay) { const m = { theme: v }; post(presenterWin, m); if (MODE === 'presenter') { post(window.opener, m); relayToPreviews(m); } }
+}
+const toggleVariant = () => setVariant(variant === 'dark' ? 'light' : 'dark', { save: true });
+
 function toggleHelp(on) {
   if (!help) {
     help = el('div', { class: 'dk-help', html: `<div role="dialog" aria-label="Keyboard shortcuts"><h3>Shortcuts</h3><div class="dk-help-cols">
@@ -1236,6 +1257,7 @@ function toggleHelp(on) {
         <tr><td><kbd>O</kbd> <kbd>Esc</kbd></td><td>all slides</td></tr>
         <tr><td><kbd>P</kbd></td><td>presenter view with notes</td></tr>
         <tr><td><kbd>F</kbd></td><td>fullscreen</td></tr>
+        ${variant ? '<tr><td><kbd>T</kbd></td><td>light / dark variant</td></tr>' : ''}
         <tr><td><kbd>B</kbd> <kbd>.</kbd></td><td>black screen</td></tr>
         <tr><td><kbd>?</kbd></td><td>this help</td></tr></table>
       ${ANN_ON ? `<table><caption>Annotate</caption>
@@ -1265,6 +1287,7 @@ const ICON = {
   laser: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>',
   bin: '<svg viewBox="0 0 24 24"><path d="M5 8h14M9 8V5h6v3M7 8l1 12h8l1-12"/></svg>',
   ok: '<svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>',
+  theme: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/></svg>',
 };
 let ui = null, uiT = 0, uiHover = false, hintEl = null, toastEl = null, toastT = 0, uiKey = '';
 function controls() {
@@ -1283,6 +1306,7 @@ function controls() {
       <button class="dk-b" data-act="presenter" data-tip="Presenter view (P)" aria-label="Presenter view">${ICON.pv}</button>
       ${ANN_ON ? `<button class="dk-b" data-act="annotate" data-tip="Draw on the slide (D)" aria-label="Draw on the slide">${ICON.pen}</button>` : ''}
       <button class="dk-b" data-act="fullscreen" data-tip="Fullscreen (F)" aria-label="Fullscreen">${ICON.fs}</button>
+      ${variant ? `<button class="dk-b" data-act="theme" data-tip="Light / dark (T)" aria-label="Light or dark variant">${ICON.theme}</button>` : ''}
       <button class="dk-b" data-act="help" data-tip="Shortcuts (?)" aria-label="Shortcuts">?</button>
     </div>` }, document.body);
   el('div', { class: 'dk-edge dk-edge-l', html: ICON.prev }, document.body);
@@ -1296,7 +1320,7 @@ function controls() {
     e.stopPropagation();
     const b = e.target.closest('[data-act],[data-i]'); if (!b) return;
     if (b.dataset.i != null) { if (overview) toggleOverview(false); goto(+b.dataset.i, 0, { animate: Math.abs(+b.dataset.i - S.i) === 1 }); }
-    else ({ prev, next, help: () => toggleHelp(), overview: () => toggleOverview(), presenter: openPresenter, annotate: () => annToggle('pen'),
+    else ({ prev, next, help: () => toggleHelp(), overview: () => toggleOverview(), presenter: openPresenter, theme: toggleVariant, annotate: () => annToggle('pen'),
       fullscreen: () => (document.fullscreenElement ? document.exitFullscreen() : html.requestFullscreen?.()) })[b.dataset.act]();
     broadcast();
   });
@@ -1345,9 +1369,10 @@ function hud() {
 }
 
 /* ───────────────────────── presenter view ───────────────────────── */
-let presenterWin = null, pvCur = null;
+let presenterWin = null, pvCur = null, pvNxt = null;
+const relayToPreviews = m => { post(pvCur && pvCur.contentWindow, m); post(pvNxt && pvNxt.contentWindow, m); };
 function openPresenter() {
-  const url = location.href.split('#')[0].split('?')[0] + '?presenter' + location.hash;
+  const url = location.href.split('#')[0].split('?')[0] + '?presenter' + (variant ? '&theme=' + variant : '') + location.hash;
   presenterWin = window.open(url, 'dk-presenter', 'width=1400,height=860');
 }
 function post(win, msg) { try { win && !win.closed && win.postMessage({ dk: 1, ...msg }, '*'); } catch (e) { /* closed */ } }
@@ -1361,9 +1386,9 @@ function nextState(i, step) {
 }
 const PV_TX = {
   en: { now: 'This slide', next: 'Next', slide: 'Slide', click: 'Click', after: 'Next slide', none: 'No notes for this slide.', end: 'End of the deck',
-    back: '‹ Back', fwd: 'Next ›', reset: 'Click to reset the timer', fsm: 'Smaller notes text', fsp: 'Larger notes text', of: 'of', lastSlide: 'This is the last slide' },
+    back: '‹ Back', fwd: 'Next ›', reset: 'Click to reset the timer', fsm: 'Smaller notes text', fsp: 'Larger notes text', of: 'of', lastSlide: 'This is the last slide', theme: 'Light / dark variant (T)' },
   ru: { now: 'Этот слайд', next: 'Дальше', slide: 'Слайд', click: 'Клик', after: 'Следующий слайд', none: 'К этому слайду нет заметок.', end: 'Конец презентации',
-    back: '‹ Назад', fwd: 'Вперёд ›', reset: 'Клик — сбросить таймер', fsm: 'Мельче текст заметок', fsp: 'Крупнее текст заметок', of: 'из', lastSlide: 'Это последний слайд' },
+    back: '‹ Назад', fwd: 'Вперёд ›', reset: 'Клик — сбросить таймер', fsm: 'Мельче текст заметок', fsp: 'Крупнее текст заметок', of: 'из', lastSlide: 'Это последний слайд', theme: 'Светлая / тёмная тема (T)' },
 };
 // Speaker notes by step. A block of the notes opens the text for step N when it has data-step="N", the class "click",
 // or starts with the marker ▸ (then it is the step after the previous one). Blocks before the first marker are step 0.
@@ -1390,7 +1415,7 @@ function presenterUI() {
     <header><span class="dk-pv-timer" title="${T.reset}">00:00</span>
       <span class="dk-pv-pos"><b></b><span></span></span><span class="dk-pv-dots"></span>
       <span class="dk-pv-fs"><button data-pv="fs-" aria-label="${T.fsm}" title="${T.fsm}">A−</button><button data-pv="fs+" aria-label="${T.fsp}" title="${T.fsp}">A+</button></span>
-      <button data-pv="prev" aria-label="${T.back}">${T.back}</button><button data-pv="next" aria-label="${T.fwd}">${T.fwd}</button><span class="dk-pv-clock"></span></header>
+      ${variant ? `<button data-pv="theme" aria-label="${T.theme}" title="${T.theme}">◐</button>` : ''}<button data-pv="prev" aria-label="${T.back}">${T.back}</button><button data-pv="next" aria-label="${T.fwd}">${T.fwd}</button><span class="dk-pv-clock"></span></header>
     <main>
       <div class="dk-pv-left">
         <section class="dk-pv-cur"><label>${T.now}</label><div class="dk-pv-frame"><iframe tabindex="-1"></iframe></div></section>
@@ -1402,8 +1427,9 @@ function presenterUI() {
       </div>
     </main>` }, document.body);
   const [cur, nxt] = ui.querySelectorAll('iframe');
-  cur.src = `${base}?embed#${S.i + 1}.${S.step}`;
-  pvCur = cur;
+  const th = variant ? '&theme=' + variant : '';   // the previews paint the same variant
+  cur.src = `${base}?embed${th}#${S.i + 1}.${S.step}`;
+  pvCur = cur; pvNxt = nxt;
   if (ANN_ON) {   // the audience window's marks and laser are mirrored into this preview (see live annotation)
     cur.addEventListener('load', () => { if (marks.size) post(cur.contentWindow, { a: 'snap', marks: [...marks] }); });
     post(window.opener, { a: 'hello' });
@@ -1413,6 +1439,7 @@ function presenterUI() {
     nowBox = q('.dk-pv-now'), afterBox = q('.dk-pv-after'), nl = q('.dk-pv-nl'), al = q('.dk-pv-al');
   let t0 = Date.now();
   timer.onclick = () => { t0 = Date.now(); };
+  if (variant) q('[data-pv=theme]').onclick = toggleVariant;
   q('[data-pv=prev]').onclick = () => { prev(); broadcast(); };
   q('[data-pv=next]').onclick = () => { next(); broadcast(); };
   let fs = 26; try { fs = +localStorage.getItem('dk-pv-fs') || fs; } catch (e) { /* storage blocked */ }
@@ -1457,7 +1484,7 @@ function presenterUI() {
     nl.textContent = !n ? T.end : n.i === S.i ? `${T.next} · ${T.click} ${n.step}` : `${T.next} · ${T.slide} ${n.i + 1}`;
     if (key !== nxtKey) {
       nxtKey = key;
-      if (n) { nxt.removeAttribute('srcdoc'); nxt.src = `${base}?embed&rest#${key}`; }
+      if (n) { nxt.removeAttribute('srcdoc'); nxt.src = `${base}?embed&rest${th}#${key}`; }
       else nxt.srcdoc = `<body style="margin:0;height:100vh;display:grid;place-items:center;background:#000;color:#777;font:24px system-ui">${T.end}</body>`;
     }
     post(cur.contentWindow, { i: S.i, step: S.step });
@@ -1697,6 +1724,7 @@ function input() {
       case 'o': case 'O': if (MODE === 'live') toggleOverview(); break;
       case 'p': case 'P': if (MODE === 'live') openPresenter(); break;
       case 'f': case 'F': document.fullscreenElement ? document.exitFullscreen() : html.requestFullscreen?.(); break;
+      case 't': case 'T': if (!variant) return; toggleVariant(); break;
       case 'b': case 'B': case '.': blackout.classList.toggle('is-on'); break;
       case '?': toggleHelp(); break;
       case 'h': case 'H': if (ANN_ON) return; toggleHelp(); break;   // H is the highlighter unless annotation is off
@@ -1744,6 +1772,7 @@ function input() {
 addEventListener('message', e => {
   const m = e.data; if (!m || m.dk !== 1 || !slides.length) return;
   if (m.a) { annRecv(m, e.source); return; }
+  if (m.theme) { setVariant(m.theme, { relay: false }); if (MODE === 'presenter') relayToPreviews(m); return; }
   if (MODE === 'embed' && Q.has('rest')) { goto(m.i, m.step); show(m.i, m.step); return; }
   sync(m.i, m.step);
 });
@@ -1898,6 +1927,7 @@ const api = {
   stage(spec) { stageSpec = spec; return api; },
   anim, transition, next, prev, goto, toast, say, fx,
   on(f) { listeners.push(f); return api; },
+  variant(v) { if (v) setVariant(v); return variant; },   // 'light' | 'dark' | '' (the deck has no theme variants)
   get state() { return { i: S.i, step: S.step, count: slides.length }; },
   W, H, MODE, ease, clamp, lerp, seg, spring, rng, mix,
   svg, el, scaleLinear, scaleBand, ticks, linePath, areaPath, arcPath, fmt, pointAt,

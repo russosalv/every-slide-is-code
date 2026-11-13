@@ -262,6 +262,8 @@ const PT = 0.5;   // 1 slide pixel (1920 wide) = 0.5 pt on a 13.333 in slide
 export async function addEditableSlides({ page, meta, list, pptx, wIn }) {
   const u = wIn / meta.W;   // slide pixels -> inches
   const stats = { slides: 0, text: 0, shape: 0, table: 0, picture: 0, background: 0, warnings: [], fonts: new Set() };
+  const found = await page.evaluate(() => document.querySelectorAll('.deck > .dk-layer > section.slide').length);
+  if (found !== meta.deck.length) throw new Error(`--editable reads the runtime's .deck > .dk-layer > section.slide structure (found ${found} slides, the deck reports ${meta.deck.length}); use the default pptx export for this page`);
   const warnAt = (st, w) => stats.warnings.push(`slide ${st.i + 1}: ${w}`);
 
   for (const st of list) {

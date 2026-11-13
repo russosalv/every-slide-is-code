@@ -4,10 +4,14 @@
 //   node scripts/sync-runtime.mjs                     refresh the template and the examples
 //   node scripts/sync-runtime.mjs my-deck.html        refresh one deck
 //   node scripts/sync-runtime.mjs --new my-deck.html  start a new deck from the template
+//   node scripts/sync-runtime.mjs --theme paper my-deck.html   inline a theme (a name or a folder; "none" removes it); also with --new (16-themes.md)
+//   node scripts/sync-runtime.mjs --theme ink --variant dark my-deck.html   the variant a deck opens in (light|dark; T and ?theme= switch it live)
+//   node scripts/sync-runtime.mjs --list-themes       themes found in themes/ and in DECK_KIT_THEMES
 //   node scripts/sync-runtime.mjs --code-cache deck.html  store highlighted code in the deck for offline use (14-code-slides.md)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { resolveTheme, loadTheme, applyTheme, listThemes, setVariant, hasTheme, VARIANTS } from './theme.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const css = fs.readFileSync(path.join(root, 'runtime/deck.css'), 'utf8').trim();
@@ -24,6 +28,25 @@ const plugin = (file, tx = s => s) => {
 const plugins = PLUGINS.map(name => ({ name, css: plugin(`${name}.css`), js: plugin(`${name}.js`, s => s.replace(/<\/script/gi, '<\\/script')) }));
 
 const args = process.argv.slice(2);
+if (args.includes('--list-themes')) {
+  for (const t of listThemes()) console.log(`${t.name.padEnd(16)} ${loadTheme(t.dir).description}  (${t.dir})`);
+  process.exit(0);
+}
+// --theme <name|folder|none>: resolved before anything is written, so a typo leaves no half-made deck behind.
+let variant;
+const vi = args.indexOf('--variant');
+if (vi >= 0) {
+  variant = args.splice(vi, 2)[1];
+  if (!VARIANTS.includes(variant)) { console.error('sync-runtime: --variant is light or dark'); process.exit(1); }
+}
+let theme;   // undefined: leave the deck's theme alone; null: remove it
+const ti = args.indexOf('--theme');
+if (ti >= 0) {
+  const spec = args.splice(ti, 2)[1];
+  try { theme = spec === 'none' ? null : loadTheme(resolveTheme(spec)); } catch (e) { console.error(`sync-runtime: ${e.message}`); process.exit(1); }
+  if (theme && variant && theme.variants.length && !theme.variants.includes(variant)) { console.error(`sync-runtime: theme ${theme.name} has no ${variant} variant (it has: ${theme.variants.join(', ')})`); process.exit(1); }
+}
+if ((theme !== undefined || variant) && !args.length) { console.error('sync-runtime: --theme and --variant need a deck file or --new deck.html'); process.exit(1); }
 // --code-cache deck.html: run the deck once (needs export/ installed and network for Shiki), and store the highlighted
 // tokens in <script type="application/json" id="deck-kit-code-cache"> so the deck (and `bundle`) works offline with the same colours.
 if (args[0] === '--code-cache') {
@@ -65,6 +88,13 @@ for (const f of files) {
   for (const { name, css: pc, js: pj } of plugins) {
     if (pc != null) h = h.replace(new RegExp(`<style id="deck-kit-${name}-css">[\\s\\S]*?</style>`), () => `<style id="deck-kit-${name}-css">\n${pc}\n</style>`);
     if (pj != null) h = h.replace(new RegExp(`<script id="deck-kit-${name}-js">[\\s\\S]*?</script>`), () => `<script id="deck-kit-${name}-js">\n${pj}\n</script>`);
+  }
+  if (theme !== undefined) {
+    h = applyTheme(h, theme);
+    // the deck opens in --variant, else the theme's default; a theme without variants leaves no data-theme behind
+    h = setVariant(h, theme && theme.variants.length > 1 ? variant || theme.default : null);
+  } else if (variant) {
+    if (hasTheme(h)) h = setVariant(h, variant); else console.warn(`skip variant for ${f}: it has no theme (use --theme)`);
   }
   if (!/id="deck-kit-js"/.test(h)) { console.warn(`skip ${f}: no <script id="deck-kit-js"> slot`); continue; }
   fs.writeFileSync(f, h);
